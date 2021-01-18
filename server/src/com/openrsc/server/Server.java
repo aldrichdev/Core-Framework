@@ -420,7 +420,7 @@ public class Server implements Runnable {
 		}
 	}
 
-	public static long bench(final Runnable r) {
+	public long bench(final Runnable r) {
 		long start = System.currentTimeMillis();
 		r.run();
 		return System.currentTimeMillis() - start;
@@ -456,7 +456,7 @@ public class Server implements Runnable {
 					outgoingTimePerPacketOpcode.clear();
 					outgoingCountPerPacketOpcode.clear();
 
-					//LOGGER.info("Tick " + currentTick + " processed.");
+					//LOGGER.info("Tick " + getCurrentTick() + " processed.");
 				} else {
 					if (getConfig().WANT_CUSTOM_WALK_SPEED) {
 						for (final Player p : getWorld().getPlayers()) {

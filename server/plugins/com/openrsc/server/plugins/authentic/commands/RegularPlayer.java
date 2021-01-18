@@ -5,9 +5,13 @@ import com.openrsc.server.content.party.PartyPlayer;
 import com.openrsc.server.content.party.PartyRank;
 import com.openrsc.server.database.GameDatabaseException;
 import com.openrsc.server.database.impl.mysql.queries.logging.ChatLog;
+import com.openrsc.server.event.custom.HolidayDropEvent;
+import com.openrsc.server.event.rsc.GameTickEvent;
 import com.openrsc.server.external.NPCDef;
+import com.openrsc.server.model.container.Item;
 import com.openrsc.server.model.entity.player.Group;
 import com.openrsc.server.model.entity.player.Player;
+import com.openrsc.server.model.entity.player.PlayerSettings;
 import com.openrsc.server.model.snapshot.Chatlog;
 import com.openrsc.server.net.rsc.ActionSender;
 import com.openrsc.server.plugins.triggers.CommandTrigger;
@@ -23,7 +27,6 @@ import java.util.Map;
 import java.util.Random;
 
 import static com.openrsc.server.plugins.Functions.config;
-import static com.openrsc.server.plugins.Functions.delay;
 import static com.openrsc.server.plugins.authentic.quests.free.ShieldOfArrav.isBlackArmGang;
 import static com.openrsc.server.plugins.authentic.quests.free.ShieldOfArrav.isPhoenixGang;
 
@@ -109,6 +112,19 @@ public final class RegularPlayer implements CommandTrigger {
 			confirmQOLOptOut(player);
 		} else if (command.equalsIgnoreCase("toggleglobalchat")) {
 			player.getSocial().toggleGlobalFriend(player);
+		} else if (command.equalsIgnoreCase("getholidaydrop") ||
+			command.equalsIgnoreCase("checkholidaydrop") ||
+			command.equalsIgnoreCase("checkholidayevent") ||
+		    command.equalsIgnoreCase("drop")) {
+			checkHolidayDrop(player);
+		} else if (command.equalsIgnoreCase("toggleblockchat")) {
+			player.getSettings().toggleBlockChat(player);
+		} else if (command.equalsIgnoreCase("toggleblockprivate")) {
+			player.getSettings().toggleBlockPrivate(player);
+		} else if (command.equalsIgnoreCase("toggleblocktrade")) {
+			player.getSettings().toggleBlockTrade(player);
+		} else if (command.equalsIgnoreCase("toggleblockduel")) {
+			player.getSettings().toggleBlockDuel(player);
 		}
 	}
 
@@ -477,8 +493,8 @@ public final class RegularPlayer implements CommandTrigger {
 		}
 		else {
 			for (Player targetPlayer : player.getWorld().getPlayers()) {
-				boolean privacy = targetPlayer.getSettings().getPrivacySetting(1);
-				if (targetPlayer.isDefaultUser() && !privacy) {
+				byte privacy = targetPlayer.getSettings().getPrivacySetting(PlayerSettings.PRIVACY_BLOCK_PRIVATE_MESSAGES, targetPlayer.isUsingAuthenticClient());
+				if (targetPlayer.isDefaultUser() && privacy == PlayerSettings.BlockingMode.None.id()) {
 					players.add(targetPlayer);
 					locations.add(""); // No locations for regular players.
 					online++;
@@ -575,6 +591,40 @@ public final class RegularPlayer implements CommandTrigger {
 			|| config().FASTER_YOHNUS
 			|| config().WANT_APOTHECARY_QOL
 			|| config().WANT_BETTER_JEWELRY_CRAFTING;
+	}
+
+	private void checkHolidayDrop(Player player) {
+		boolean foundEvent = false;
+		StringBuilder eventDetails = new StringBuilder();
+		HashMap<String, GameTickEvent> events = player.getWorld().getServer().getGameEventHandler().getEvents();
+		eventDetails.append("% %");
+		for (GameTickEvent event : events.values()) {
+			if (!(event instanceof HolidayDropEvent)) continue;
+
+			foundEvent = true;
+			HolidayDropEvent holidayEvent = (HolidayDropEvent) event;
+
+			eventDetails.append("@yel@There is currently a Holiday Drop Event running:%");
+			eventDetails.append("@lre@Occurs on minute @gre@" + holidayEvent.getMinute() + "@lre@ of each hour%");
+			eventDetails.append("@lre@Total Hours: @gre@" + holidayEvent.getLifeTime() + "@lre@, Elapsed Hours: @gre@" + holidayEvent.getElapsedHours() + "@lre@, Hours Left: @gre@" + Math.abs(holidayEvent.getLifeTimeLeft()));
+
+			StringBuilder itemNamesBuilder = new StringBuilder();
+			for (Integer item : holidayEvent.getItems()) {
+				itemNamesBuilder.append(new Item(item).getDef(player.getWorld()).getName().replaceAll(" ", " @gre@"));
+				itemNamesBuilder.append(" @or3@(");
+				itemNamesBuilder.append(item);
+				itemNamesBuilder.append(")@lre@, @gre@");
+			}
+			String itemNames = itemNamesBuilder.substring(0, itemNamesBuilder.length() - "@lre@, @gre@".length());
+
+			eventDetails.append("%@lre@Items: @gre@" + itemNames);
+			eventDetails.append("% %");
+		}
+		if (foundEvent) {
+			ActionSender.sendBox(player, eventDetails.toString(), true);
+		} else {
+			player.message(messagePrefix + "There is no running Holiday Drop Event");
+		}
 	}
 
 	private void queryGroupIDs(Player player) {

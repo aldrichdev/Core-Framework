@@ -26,12 +26,15 @@ import com.openrsc.server.model.entity.player.Player;
 import com.openrsc.server.model.snapshot.Snapshot;
 import com.openrsc.server.model.world.region.RegionManager;
 import com.openrsc.server.model.world.region.TileValue;
+import com.openrsc.server.net.ConnectionAttachment;
+import com.openrsc.server.net.PcapLogger;
 import com.openrsc.server.net.rsc.ActionSender;
 import com.openrsc.server.plugins.MiniGameInterface;
 import com.openrsc.server.plugins.QuestInterface;
 import com.openrsc.server.util.*;
 import com.openrsc.server.util.rsc.CollisionFlag;
 import com.openrsc.server.util.rsc.MessageType;
+import io.netty.util.AttributeKey;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -66,41 +69,36 @@ public final class World implements SimpleSubscriber<FishingTrawler>, Runnable {
 	public int godSpellsStart = 1;
 	public int godSpellsMax = 5;
 
+	private final Server server;
 	private final RegionManager regionManager;
 	private final EntityList<Npc> npcs;
-	private HashMap<String, ArrayList<Npc>> npcPositions;
 	private final EntityList<Player> players;
+
 	private final List<QuestInterface> quests;
 	private final List<MiniGameInterface> minigames;
 	private final List<Shop> shops;
-	private final ConcurrentMap<TrawlerBoat, FishingTrawler> fishingTrawler;
 	private final PartyManager partyManager;
 	private final ClanManager clanManager;
 	private final Market market;
 	private final WorldLoader worldLoader;
+	private HashMap<String, ArrayList<Npc>> npcPositions;
+	private final ConcurrentMap<TrawlerBoat, FishingTrawler> fishingTrawler;
 
 	private ConcurrentMap<Player, Boolean> playerUnderAttackMap;
 	private ConcurrentMap<Npc, Boolean> npcUnderAttackMap;
-
 	private Queue<GlobalMessage> globalMessageQueue = new LinkedList<>();
-
 	private PathfindingDebug pathfindingDebug = null;
-
 	public NpcDrops npcDrops;
-
-	/**
-	 * Double ended queue to store snapshots into
-	 */
 	private Deque<Snapshot> snapshots;
 
-	private final Server server;
+	public static final AttributeKey<ConnectionAttachment> attachment = AttributeKey.valueOf("conn-attachment");
 
 	public World(final Server server) {
 		this.server = server;
 		this.npcs = new EntityList<>(4000);
+		this.players = new EntityList<>(2000);
 		this.npcPositions = new HashMap<>();
 		this.npcDrops = new NpcDrops(this);
-		this.players = new EntityList<>(2000);
 		this.quests = Collections.synchronizedList( new LinkedList<>() );
 		this.minigames = Collections.synchronizedList( new LinkedList<>() );
 		this.shops = Collections.synchronizedList( new ArrayList<>() );
@@ -776,6 +774,12 @@ public final class World implements SimpleSubscriber<FishingTrawler>, Runnable {
 			}
 			player.logout();
 			LOGGER.info("Unregistered " + player.getUsername() + " from player list.");
+
+			if (getServer().getConfig().WANT_PCAP_LOGGING) {
+				PcapLogger pcap = player.getChannel().attr(attachment).get().pcapLogger.get();
+				pcap.exportPCAP(player);
+				LOGGER.info("Wrote out pcap for " + player.getUsername() + " at " + pcap.fname);
+			}
 		} catch (final Exception e) {
 			LOGGER.catching(e);
 		}

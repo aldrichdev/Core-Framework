@@ -8,6 +8,7 @@ import com.openrsc.server.content.clan.ClanPlayer;
 import com.openrsc.server.content.party.Party;
 import com.openrsc.server.content.party.PartyManager;
 import com.openrsc.server.content.party.PartyPlayer;
+import com.openrsc.server.event.custom.HolidayDropEvent;
 import com.openrsc.server.model.Shop;
 import com.openrsc.server.model.container.BankPreset;
 import com.openrsc.server.model.container.Equipment;
@@ -441,6 +442,8 @@ public class ActionSender {
 
 	/**
 	 * Updates a friends login status
+	 * @param player - Our player
+	 * @param usernameHash - the friend player
 	 */
 	public static void sendFriendUpdate(Player player, long usernameHash) {
 		com.openrsc.server.net.PacketBuilder s = new com.openrsc.server.net.PacketBuilder();
@@ -453,15 +456,16 @@ public class ActionSender {
 			username = "Global$";
 		}
 
-		else if (
-			player.getWorld().getPlayer(usernameHash) != null &&
-				player.getWorld().getPlayer(usernameHash).isLoggedIn() &&
-				(!player.getWorld().getPlayer(usernameHash).getSettings().getPrivacySetting(1) ||
-					player.getWorld().getPlayer(usernameHash).getSocial().isFriendsWith(player.getUsernameHash()) ||
-					player.isMod()
-				)
-		) {
-			onlineStatus |= 4 | 2; // 4 for is online and 2 for on same world. 1 would be if the User's name changed from original
+		else if (player.getWorld().getPlayer(usernameHash) != null &&
+				player.getWorld().getPlayer(usernameHash).isLoggedIn()) {
+			Player otherPlayer = player.getWorld().getPlayer(usernameHash);
+			boolean blockAll = otherPlayer.getSettings().getPrivacySetting(PlayerSettings.PRIVACY_BLOCK_PRIVATE_MESSAGES, otherPlayer.isUsingAuthenticClient())
+				== PlayerSettings.BlockingMode.All.id();
+			boolean blockNone = otherPlayer.getSettings().getPrivacySetting(PlayerSettings.PRIVACY_BLOCK_PRIVATE_MESSAGES, otherPlayer.isUsingAuthenticClient())
+				== PlayerSettings.BlockingMode.None.id();
+			if (blockNone || (otherPlayer.getSocial().isFriendsWith(player.getUsernameHash()) && !blockAll) || player.isMod()) {
+				onlineStatus |= 4 | 2; // 4 for is online and 2 for on same world. 1 would be if the User's name changed from original
+			}
 		}
 
 		s.setID(Opcode.SEND_FRIEND_UPDATE.opcode);
@@ -501,7 +505,7 @@ public class ActionSender {
             s.writeByte((byte) player.getCombatStyle());
             s.writeByte(player.getGlobalBlock()); // 9
             s.writeByte((byte) (player.getClanInviteSetting() ? 0 : 1)); // 11
-            s.writeByte((byte) (player.getVolumeToRotate() ? 1 : 0)); // 16
+            s.writeByte((byte) (player.getVolumeFunction())); // 16
             s.writeByte((byte) (player.getSwipeToRotate() ? 1 : 0)); // 17
             s.writeByte((byte) (player.getSwipeToScroll() ? 1 : 0)); // 18
             s.writeByte(player.getLongPressDelay()); // 19
@@ -1129,17 +1133,32 @@ public class ActionSender {
 		player.write(s.toPacket());
 	}
 
-	private static void sendPrivacySettings(Player player) {
+	public static void sendPrivacySettings(Player player) {
 		com.openrsc.server.net.PacketBuilder s = new com.openrsc.server.net.PacketBuilder();
 		s.setID(Opcode.SEND_PRIVACY_SETTINGS.opcode);
-		s.writeByte(
-			(byte) (player.getSettings().getPrivacySetting(PlayerSettings.PRIVACY_BLOCK_CHAT_MESSAGES) ? 1 : 0));
-		s.writeByte(
-			(byte) (player.getSettings().getPrivacySetting(PlayerSettings.PRIVACY_BLOCK_PRIVATE_MESSAGES) ? 1 : 0));
-		s.writeByte(
-			(byte) (player.getSettings().getPrivacySetting(PlayerSettings.PRIVACY_BLOCK_TRADE_REQUESTS) ? 1 : 0));
-		s.writeByte(
-			(byte) (player.getSettings().getPrivacySetting(PlayerSettings.PRIVACY_BLOCK_DUEL_REQUESTS) ? 1 : 0));
+		if (player.isUsingAuthenticClient()) {
+			s.writeByte(
+				(byte) (player.getSettings().getPrivacySetting(PlayerSettings.PRIVACY_BLOCK_CHAT_MESSAGES, true)
+					!= PlayerSettings.BlockingMode.None.id() ? 1 : 0));
+			s.writeByte(
+				(byte) (player.getSettings().getPrivacySetting(PlayerSettings.PRIVACY_BLOCK_PRIVATE_MESSAGES, true)
+					!= PlayerSettings.BlockingMode.None.id() ? 1 : 0));
+			s.writeByte(
+				(byte) (player.getSettings().getPrivacySetting(PlayerSettings.PRIVACY_BLOCK_TRADE_REQUESTS,true)
+					!= PlayerSettings.BlockingMode.None.id() ? 1 : 0));
+			s.writeByte(
+				(byte) (player.getSettings().getPrivacySetting(PlayerSettings.PRIVACY_BLOCK_DUEL_REQUESTS, true)
+					!= PlayerSettings.BlockingMode.None.id() ? 1 : 0));
+		} else {
+			s.writeByte(
+				(player.getSettings().getPrivacySetting(PlayerSettings.PRIVACY_BLOCK_CHAT_MESSAGES, false)));
+			s.writeByte(
+				(player.getSettings().getPrivacySetting(PlayerSettings.PRIVACY_BLOCK_PRIVATE_MESSAGES, false)));
+			s.writeByte(
+				(player.getSettings().getPrivacySetting(PlayerSettings.PRIVACY_BLOCK_TRADE_REQUESTS, false)));
+			s.writeByte(
+				(player.getSettings().getPrivacySetting(PlayerSettings.PRIVACY_BLOCK_DUEL_REQUESTS, false)));
+		}
 		player.write(s.toPacket());
 	}
 
@@ -1231,6 +1250,11 @@ public class ActionSender {
 	 * Sends a sound effect
 	 */
 	public static void sendSound(Player player, String soundName) {
+		if (!player.getWorld().getServer().getConfig().MEMBER_WORLD) {
+			// F2P does not have sound effects
+			return;
+		}
+
 		com.openrsc.server.net.PacketBuilder s = new com.openrsc.server.net.PacketBuilder();
 		s.setID(Opcode.SEND_PLAY_SOUND.opcode);
 		if (player.isUsingAuthenticClient()) {
@@ -1515,9 +1539,11 @@ public class ActionSender {
 		if (player.isUsingAuthenticClient()) {
             int itemsInBank = player.getBank().size();
             s.writeByte(itemsInBank > 255 ? (byte)255 : itemsInBank & 0xFF);
-            if (itemsInBank > 192) {
-                sendMessage(player, "Warning: Unable to display all items in bank!");
-            }
+			if ((player.getWorld().getServer().getConfig().MEMBER_WORLD && itemsInBank > 192) ||
+				(!player.getWorld().getServer().getConfig().MEMBER_WORLD && itemsInBank > 48)) {
+				sendMessage(player, "Warning: Unable to display all items in bank!");
+			}
+
             s.writeByte(player.getBankSize() > 255 ? (byte)255 : player.getBankSize() & 0xFF);
             // If bank is filled to page 4 and bank size reports supporting more than 4 pages
             if (itemsInBank > (192 - 48) && player.getBankSize() > 192) {
@@ -1705,11 +1731,15 @@ public class ActionSender {
                 sendPrivacySettings(player);
                 sendMessage(player, null,  MessageType.QUEST, "Welcome to " + player.getConfig().SERVER_NAME + "!", 0, null);
 
-                // This warning should not be removed until the Scenery Handler is handled correctly
+                // This warning can be removed soon, just want to make sure that scenery handler is really OK
                 if (player.isUsingAuthenticClient()) {
-					sendMessage(player, null,  MessageType.QUEST, "Authentic client support is currently in beta.", 0, "@lre@");
+					sendMessage(player, null,  MessageType.QUEST, "Authentic client support is nearly out of beta.", 0, "@lre@");
 					sendMessage(player, null,  MessageType.QUEST, "Please report any issues, and thanks for understanding.", 0, "@lre@");
 				}
+
+				if (HolidayDropEvent.isOccurring(player) && player.getWorld().getServer().getConfig().WANT_BANK_PINS) { // TODO: this is not a good way to detect that we are not using the RSCP config
+				    sendMessage(player, null, MessageType.QUEST, "@mag@There is a Holiday Drop Event going on now! Type @gre@::drop@mag@ for more information.", 0, null);
+                }
 
                 sendGameSettings(player);
 				sendWorldInfo(player);

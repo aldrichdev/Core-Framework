@@ -22,6 +22,8 @@ import com.openrsc.server.model.world.region.TileValue;
 import com.openrsc.server.net.rsc.ActionSender;
 import com.openrsc.server.util.rsc.DataConversions;
 import com.openrsc.server.util.rsc.MessageType;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 /** Functions.java
  *
@@ -88,6 +90,10 @@ import com.openrsc.server.util.rsc.MessageType;
 
 
 public class Functions {
+	/**
+	 * The asynchronous logger.
+	 */
+	private static final Logger LOGGER = LogManager.getLogger();
 
 	/**
 	 * Displays item bubble above players head.
@@ -211,6 +217,7 @@ public class Functions {
 	}
 
 	public static int multi(final Player player, final Npc npc, final boolean sendToClient, final String... options) {
+		LOGGER.info("enter multi, " + PluginTask.getContextPluginTask().getDescriptor() + " tick " + PluginTask.getContextPluginTask().getWorld().getServer().getCurrentTick());
 		final long start = System.currentTimeMillis();
 		if (npc != null) {
 			if (npc.isRemoved()) {
@@ -225,24 +232,22 @@ public class Functions {
 		player.setMenuHandler(new MenuOptionListener(options));
 		ActionSender.sendMenu(player, options);
 
-		synchronized (player.getMenuHandler()) {
-			while (!player.checkUnderAttack()) {
-				if (player.getOption() != -1) {
-					if (npc != null && options[player.getOption()] != null) {
-						if (sendToClient)
-							say(player, npc, options[player.getOption()]);
-					}
-					return player.getOption();
-				} else if (System.currentTimeMillis() - start > 90000 || player.getMenuHandler() == null) {
-					player.resetMenuHandler();
-					return -1;
+		while (!player.checkUnderAttack()) {
+			if (player.getOption() != -1) {
+				if (npc != null && options[player.getOption()] != null) {
+					if (sendToClient)
+						say(player, npc, options[player.getOption()]);
 				}
-
-				delay();
+				return player.getOption();
+			} else if (System.currentTimeMillis() - start > 90000 || player.getMenuHandler() == null) {
+				player.resetMenuHandler();
+				return -1;
 			}
-			player.releaseUnderAttack();
-			return -1;
+
+			delay();
 		}
+		player.releaseUnderAttack();
+		return -1;
 	}
 
 	public static void advancestat(Player player, int skillId, int baseXp, int expPerLvl) {
@@ -1487,26 +1492,8 @@ public class Functions {
 		player.getCache().remove("gnome_recipe");
 	}
 
-	public static boolean checkAndRemoveBlurberry(Player player, boolean reset) {
-		String[] caches = {
-			"lemon_in_shaker", "orange_in_shaker", "pineapple_in_shaker", "lemon_slices_to_drink",
-			"drunk_dragon_base", "diced_pa_to_drink", "cream_into_drink", "dwell_in_shaker",
-			"gin_in_shaker", "vodka_in_shaker", "fruit_blast_base", "lime_in_shaker", "sgg_base",
-			"leaves_into_drink", "lime_slices_to_drink", "whisky_in_shaker", "milk_in_shaker",
-			"leaves_in_shaker", "choco_bar_in_drink", "chocolate_saturday_base", "heated_choco_saturday",
-			"choco_dust_into_drink", "brandy_in_shaker", "diced_orange_in_drink", "blurberry_special_base",
-			"diced_lemon_in_drink", "pineapple_punch_base", "diced_lime_in_drink", "wizard_blizzard_base"
-		};
-		for (String s : caches) {
-			if (player.getCache().hasKey(s)) {
-				if (reset) {
-					player.getCache().remove(s);
-					continue;
-				}
-				return true;
-			}
-		}
-		return false;
+	public static void resetGnomeBartending(Player player) {
+		player.getCache().remove("cocktail_recipe");
 	}
 
 	public static void boundaryTeleport(Player player, Point location) {
